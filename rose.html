@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Virtual Pink Rose — Click to Bloom</title>
+<style>
+  :root{
+    --bg:#fff7fb;
+    --panel:#fff;
+    --accent:#ffb6d1;
+    --rose-deep:#d94e86;
+    --rose-mid:#f07aa8;
+    --rose-light:#ffd3e6;
+  }
+
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+  body{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(180deg,var(--bg),#fff);
+    padding:20px;
+  }
+
+  .card{
+    background:var(--panel);
+    border-radius:14px;
+    box-shadow:0 8px 30px rgba(150,60,100,0.12);
+    padding:18px;
+    width:960px;
+    max-width:96vw;
+    display:flex;
+    gap:18px;
+    align-items:center;
+  }
+
+  .canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center}
+  svg{width:100%;height:560px;max-height:70vh;overflow:visible}
+
+  .controls{
+    width:300px;
+    min-width:220px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+
+  label{font-size:13px;color:#333}
+  input[type="range"]{width:100%}
+  .btn{
+    background:linear-gradient(180deg,var(--accent),#ff9fc6);
+    border:none;color:white;padding:10px 12px;border-radius:10px;font-weight:600;
+    cursor:pointer;box-shadow:0 6px 18px rgba(200,60,100,0.12)
+  }
+  .btn.secondary{background:#fff;border:1px solid #ffd6ea;color:#333}
+  .note{font-size:13px;color:#666}
+  .row{display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+  <div class="card" role="main">
+    <div class="canvas-wrap">
+      <!-- SVG container: JS will inject roses here -->
+      <svg id="garden" viewBox="0 0 1000 600" aria-label="Virtual rose garden" role="img"></svg>
+    </div>
+
+    <div class="controls" aria-hidden="false">
+      <label>Petals: <span id="petalCountLabel">10</span></label>
+      <input id="petalCount" type="range" min="6" max="22" value="10" />
+
+      <label>Size: <span id="sizeLabel">120</span> px</label>
+      <input id="sizeRange" type="range" min="40" max="220" value="120" />
+
+      <label>Inner swirl tightness: <span id="tightLabel">0.6</span></label>
+      <input id="tightRange" type="range" min="0.2" max="1.6" step="0.05" value="0.6" />
+
+      <div class="row">
+        <button id="addRose" class="btn">Add Rose</button>
+        <button id="clear" class="btn secondary">Clear</button>
+      </div>
+
+      <p class="note">Click any rose to animate a bloom. Drag sliders before adding a rose to set its look.</p>
+    </div>
+  </div>
+
+<script>
+/*
+  Virtual Pink Rose generator (SVG)
+  - Creates a stylized rose by drawing rotated petal shapes (ellipses made with path)
+  - Click a rose group to animate it (scale from 0.2 to 1.05 then settle to 1)
+  - Parameters customizable: petal count, size, inner-tightness
+*/
+
+const svg = document.getElementById('garden');
+
+function createPetalPath(width, height) {
+  // Petal is roughly an ellipse drawn via cubic Bézier path. Center at 0,0 pointing upwards.
+  // width: horizontal radius, height: vertical radius
+  const w = width, h = height;
+  const path = [
+    `M 0 ${-h}`,                              // top point
+    `C ${w*0.6} ${-h*0.6} ${w*0.6} ${h*0.2} ${w*0.02} ${h*0.7}`, // right curve
+    `C ${w*-0.2} ${h*0.95} ${w*-0.8} ${h*0.95} ${w*-0.98} ${h*0.7}`, // bottom rounding
+    `C ${-w*0.6} ${h*0.2} ${-w*0.6} ${-h*0.6} 0 ${-h}`, // left curve back to top
+    `Z`
+  ];
+  return path.join(' ');
+}
+
+function makeRose(cx, cy, petals=10, size=120, tight=0.6, colors=null){
+  // colors: {deep, mid, light}
+  colors = colors || {deep:'#d94e86', mid:'#f07aa8', light:'#ffd3e6'};
+
+  const group = document.createElementNS('http://www.w3.org/2000/svg','g');
+  group.setAttribute('transform', `translate(${cx},${cy})`);
+  group.classList.add('rose-group');
+
+  // base radius for petal geometry
+  const petalW = size * 0.6;
+  const petalH = size * (0.9 - tight*0.25); // tightness affects vertical spread
+
+  const pathD = createPetalPath(petalW, petalH);
+
+  // Create layered petals: outer, mid, inner, and a central swirl.
+  const layers = [
+    {count: petals, scale:1.0, color:colors.mid, blur:0, rotateOffset:0},
+    {count: Math.max( Math.round(petals*0.75), 4), scale:0.78, color:colors.deep, blur:0, rotateOffset:15},
+    {count: Math.max( Math.round(petals*0.45), 3), scale:0.52, color:colors.light, blur:0, rotateOffset:30}
+  ];
+
+  layers.forEach((layer, li) => {
+    const layerGroup = document.createElementNS('http://www.w3.org/2000/svg','g');
+    layerGroup.setAttribute('class', 'layer-' + li);
+    layerGroup.setAttribute('transform', `scale(${layer.scale})`);
+    for(let i=0;i<layer.count;i++){
+      const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+      p.setAttribute('d', pathD);
+      const rot = (360 / layer.count) * i + layer.rotateOffset;
+      p.setAttribute('transform', `rotate(${rot})`);
+      p.setAttribute('fill', layer.color);
+      p.setAttribute('stroke', 'rgba(0,0,0,0.02)');
+      p.setAttribute('stroke-width', '0.6');
+      p.style.transformOrigin = 'center';
+      p.style.filter = layer.blur ? `blur(${layer.blur}px)` : '';
+      layerGroup.appendChild(p);
+    }
+    group.appendChild(layerGroup);
+  });
+
+  // center swirl (tiny circles)
+  const swirl = document.createElementNS('http://www.w3.org/2000/svg','g');
+  const centerCount = 8;
+  for(let i=0;i<centerCount;i++){
+    const c = document.createElementNS('http://www.w3.org/2000/svg','ellipse');
+    const angle = (i/centerCount) * Math.PI * 2;
+    const r = size * 0.08 * (1 + 0.2 * Math.sin(i*1.3));
+    const px = Math.cos(angle) * size * 0.06;
+    const py = Math.sin(angle) * size * 0.06;
+    c.setAttribute('cx', px.toFixed(2));
+    c.setAttribute('cy', py.toFixed(2));
+    c.setAttribute('rx', (r*1.1).toFixed(2));
+    c.setAttribute('ry', (r*0.7).toFixed(2));
+    c.setAttribute('fill', i%2?colors.deep:colors.mid);
+    c.setAttribute('transform', `rotate(${i*22})`);
+    c.setAttribute('opacity', 0.95);
+    swirl.appendChild(c);
+  }
+  group.appendChild(swirl);
+
+  // Add a single subtle drop shadow-like ellipse behind
+  const back = document.createElementNS('http://www.w3.org/2000/svg','ellipse');
+  back.setAttribute('cx','0');
+  back.setAttribute('cy', (size*0.28).toString());
+  back.setAttribute('rx', (size*0.5).toString());
+  back.setAttribute('ry', (size*0.15).toString());
+  back.setAttribute('fill', 'rgba(200,70,110,0.08)');
+  group.insertBefore(back, group.firstChild);
+
+  // initial scale small for animation
+  group.style.transformOrigin = `${cx}px ${cy}px`;
+  group.setAttribute('data-size', size);
+  group.setAttribute('role','img');
+  group.setAttribute('aria-label','Pink rose');
+
+  // Attach click animation
+  group.addEventListener('click', (e) => {
+    e.stopPropagation();
+    animateBloom(group);
+  });
+
+  return group;
+}
+
+function animateBloom(g){
+  // Keyframe like animation using Web Animations API
+  // scale from 0.22 to 1.05 then settle to 1.0
+  // but some roses might already be open; read computed
+  const startScale = getComputedScale(g) || 0.18;
+  // apply transform relative to its current translate (SVG transform vs CSS transform mixing).
+  // We'll animate via CSS scale on the group element.
+  g.animate([
+    { transform: `scale(${startScale})` , opacity: 0.98 },
+    { transform: 'scale(1.06)', offset: 0.75 },
+    { transform: 'scale(1.0)' }
+  ], {
+    duration: 700,
+    easing: 'cubic-bezier(.2,.9,.2,1)',
+    fill: 'forwards'
+  });
+}
+
+function getComputedScale(el){
+  const s = getComputedStyle(el).transform;
+  if(!s || s === 'none') return null;
+  // transform may be matrix(a,b,c,d,e,f) => scale = sqrt(a^2 + b^2)
+  const m = s.match(/matrix\(([^)]+)\)/);
+  if(!m) return null;
+  const parts = m[1].split(',').map(Number);
+  const a = parts[0], b = parts[1];
+  return Math.sqrt(a*a + b*b);
+}
+
+// Utility to add a rose where user clicks on the canvas
+svg.addEventListener('click', (ev) => {
+  // skip if clicked on existing rose (they handle their own click)
+  if(ev.target.closest('.rose-group')) return;
+  const pt = svg.createSVGPoint();
+  pt.x = ev.clientX;
+  pt.y = ev.clientY;
+  const svgPt = pt.matrixTransform(svg.getScreenCTM().inverse());
+  addRoseAt(svgPt.x, svgPt.y);
+});
+
+function addRoseAt(x=500,y=300){
+  const petals = +document.getElementById('petalCount').value;
+  const size = +document.getElementById('sizeRange').value;
+  const tight = +document.getElementById('tightRange').value;
+
+  const colors = {deep:'#b23a66', mid:'#ef7aa3', light:'#ffd8e8'};
+  const rose = makeRose(x,y,petals,size,tight,colors);
+  // initial CSS scale small to make bloom animation visible
+  rose.style.transform = 'scale(0.18)';
+  svg.appendChild(rose);
+  // trigger bloom shortly after insertion
+  requestAnimationFrame(()=> animateBloom(rose));
+}
+
+// controls wiring
+const petalCount = document.getElementById('petalCount');
+const petalCountLabel = document.getElementById('petalCountLabel');
+petalCount.addEventListener('input', ()=> petalCountLabel.textContent = petalCount.value);
+
+const sizeRange = document.getElementById('sizeRange');
+const sizeLabel = document.getElementById('sizeLabel');
+sizeRange.addEventListener('input', ()=> sizeLabel.textContent = sizeRange.value);
+
+const tightRange = document.getElementById('tightRange');
+const tightLabel = document.getElementById('tightLabel');
+tightRange.addEventListener('input', ()=> tightLabel.textContent = tightRange.value);
+
+document.getElementById('addRose').addEventListener('click', ()=> {
+  // add rose near center
+  addRoseAt(500 + (Math.random()-0.5)*220, 300 + (Math.random()-0.5)*150);
+});
+
+document.getElementById('clear').addEventListener('click', ()=> {
+  // remove all rose-group elements
+  [...svg.querySelectorAll('.rose-group')].forEach(r=>r.remove());
+});
+
+// initial demonstration roses
+addRoseAt(360,270);
+addRoseAt(640,310);
+</script>
+</body>
+</html>
